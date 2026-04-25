@@ -1,0 +1,216 @@
+#!/usr/bin/env bash
+# wiki-health — run a structural health check on an agent-maintained wiki
+#
+# Usage:
+#   wiki-health --wiki <path>
+#   wiki-health --wiki <path> --json      # machine-readable output
+#
+# Checks:
+#   [provenance]  source pages missing provenance: frontmatter
+#   [orphan]      concept/source pages not listed in their index files
+#   [stale-log]   wiki/log.md not updated in >48h
+#   [empty-inbox] raw/inbox/ has unprocessed files
+#   [broken-link] wikilinks pointing to non-existent pages (basic scan)
+#   [no-concepts] wiki/concepts/ is empty or missing
+#   [no-sources]  wiki/sources/ is empty or missing
+#
+# Exit 0 = healthy (or only warnings). Exit 2 = errors found.
+
+set -euo pipefail
+
+WIKI=""
+JSON_MODE=false
+ERRORS=0
+WARNINGS=0
+
+declare -a REPORT=()
+
+usage() {
+  grep '^#' "$0" | grep -v '#!/' | sed 's/^# \{0,2\}//'
+  exit 1
+}
+
+flag() {
+  local level="$1" check="$2" msg="$3"
+  REPORT+=("[$level][$check] $msg")
+  if [[ "$level" == "ERROR" ]]; then ((ERRORS++)) || true; fi
+  if [[ "$level" == "WARN"  ]]; then ((WARNINGS++)) || true; fi
+}
+
+ok() {
+  local check="$1" msg="$2"
+  REPORT+=("[OK][$check] $msg")
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --wiki)   WIKI="$2"; shift 2 ;;
+    --json)   JSON_MODE=true; shift ;;
+    --help|-h) usage ;;
+    *) echo "Unknown argument: $1" >&2; exit 1 ;;
+  esac
+done
+
+if [[ -z "$WIKI" ]]; then
+  echo "ERROR: --wiki <path> is required" >&2
+  exit 1
+fi
+
+WIKI="$(realpath "$WIKI")"
+
+if [[ ! -f "$WIKI/README.md" ]]; then
+  echo "ERROR: $WIKI/README.md not found — is this a valid wiki root?" >&2
+  exit 1
+fi
+
+# --- Check: wiki/sources/ exists and is non-empty ---
+if [[ ! -d "$WIKI/wiki/sources" ]]; then
+  flag ERROR no-sources "wiki/sources/ directory missing"
+elif [[ -z "$(find "$WIKI/wiki/sources" -name "*.md" | head -1)" ]]; then
+  flag WARN no-sources "wiki/sources/ exists but contains no .md files"
+else
+  COUNT=$(find "$WIKI/wiki/sources" -name "*.md" | wc -l | tr -d ' ')
+  ok no-sources "$COUNT source page(s) found"
+fi
+
+# --- Check: wiki/concepts/ exists and is non-empty ---
+if [[ ! -d "$WIKI/wiki/concepts" ]]; then
+  flag ERROR no-concepts "wiki/concepts/ directory missing"
+elif [[ -z "$(find "$WIKI/wiki/concepts" -name "*.md" | head -1)" ]]; then
+  flag WARN no-concepts "wiki/concepts/ exists but contains no .md files"
+else
+  COUNT=$(find "$WIKI/wiki/concepts" -name "*.md" | wc -l | tr -d ' ')
+  ok no-concepts "$COUNT concept page(s) found"
+fi
+
+# --- Check: provenance on source pages ---
+if [[ -d "$WIKI/wiki/sources" ]]; then
+  MISSING_PROV=0
+  while IFS= read -r f; do
+    if ! grep -q "^provenance:" "$f" 2>/dev/null; then
+      flag ERROR provenance "Missing provenance: frontmatter in $(basename "$f")"
+      ((MISSING_PROV++)) || true
+    fi
+  done < <(find "$WIKI/wiki/sources" -name "*.md" 2>/dev/null | sort)
+  if [[ $MISSING_PROV -eq 0 && -d "$WIKI/wiki/sources" ]]; then
+    ok provenance "All source pages have provenance: frontmatter"
+  fi
+fi
+
+# --- Check: orphan concept pages (not listed in wiki/concepts.md) ---
+if [[ -f "$WIKI/wiki/concepts.md" && -d "$WIKI/wiki/concepts" ]]; then
+  ORPHAN_C=0
+  while IFS= read -r f; do
+    slug="$(basename "$f" .md)"
+    if ! grep -qF "$slug" "$WIKI/wiki/concepts.md"; then
+      flag WARN orphan "Concept page not listed in wiki/concepts.md: $slug"
+      ((ORPHAN_C++)) || true
+    fi
+  done < <(find "$WIKI/wiki/concepts" -name "*.md" | sort)
+  if [[ $ORPHAN_C -eq 0 ]]; then
+    ok orphan "All concept pages listed in wiki/concepts.md"
+  fi
+fi
+
+# --- Check: orphan source pages (not listed in wiki/sources.md) ---
+if [[ -f "$WIKI/wiki/sources.md" && -d "$WIKI/wiki/sources" ]]; then
+  ORPHAN_S=0
+  while IFS= read -r f; do
+    slug="$(basename "$f" .md)"
+    if ! grep -qF "$slug" "$WIKI/wiki/sources.md"; then
+      flag WARN orphan "Source page not listed in wiki/sources.md: $slug"
+      ((ORPHAN_S++)) || true
+    fi
+  done < <(find "$WIKI/wiki/sources" -name "*.md" | sort)
+  if [[ $ORPHAN_S -eq 0 ]]; then
+    ok orphan "All source pages listed in wiki/sources.md"
+  fi
+fi
+
+# --- Check: wiki/log.md staleness ---
+if [[ ! -f "$WIKI/wiki/log.md" ]]; then
+  flag ERROR stale-log "wiki/log.md does not exist"
+else
+  LAST_MOD=$(find "$WIKI/wiki/log.md" -newer /tmp -prune -o \
+    -mmin +$((48*60)) -print 2>/dev/null || true)
+  # Simpler: just check mtime in hours
+  NOW=$(date +%s)
+  LOG_MTIME=$(stat -c %Y "$WIKI/wiki/log.md" 2>/dev/null || stat -f %m "$WIKI/wiki/log.md" 2>/dev/null || echo 0)
+  AGE_H=$(( (NOW - LOG_MTIME) / 3600 ))
+  if [[ $AGE_H -gt 48 ]]; then
+    flag WARN stale-log "wiki/log.md last modified ${AGE_H}h ago — maintenance may have missed a run"
+  else
+    ok stale-log "wiki/log.md updated ${AGE_H}h ago"
+  fi
+fi
+
+# --- Check: raw/inbox unprocessed files ---
+if [[ -d "$WIKI/raw/inbox" ]]; then
+  INBOX_COUNT=$(find "$WIKI/raw/inbox" -name "*.md" | wc -l | tr -d ' ')
+  if [[ "$INBOX_COUNT" -gt 0 ]]; then
+    flag WARN empty-inbox "$INBOX_COUNT file(s) in raw/inbox/ waiting for ingest"
+    find "$WIKI/raw/inbox" -name "*.md" | sort | while IFS= read -r f; do
+      REPORT+=("         $(basename "$f")")
+    done
+  else
+    ok empty-inbox "raw/inbox/ is clear"
+  fi
+fi
+
+# --- Check: basic broken wikilinks ---
+BROKEN=0
+while IFS= read -r f; do
+  while IFS= read -r link; do
+    # Strip alias (|...) and path prefix — just check the final slug
+    target_slug=$(echo "$link" | sed 's/|.*//' | sed 's|.*/||')
+    [[ -z "$target_slug" ]] && continue
+    # Skip cross-vault links (contain ..) — they point outside wiki/ and can't be checked here
+    echo "$link" | grep -q '\.\.' && continue
+    # Check if a file with that slug exists anywhere under wiki/
+    if ! find "$WIKI/wiki" -name "${target_slug}.md" 2>/dev/null | grep -q .; then
+      flag WARN broken-link "Broken wikilink [[${link}]] in $(basename "$f")"
+      ((BROKEN++)) || true
+    fi
+  done < <(grep -oP '\[\[([^\]|]+)' "$f" 2>/dev/null | sed 's/\[\[//' || true)
+done < <(find "$WIKI/wiki" -name "*.md" | sort)
+if [[ $BROKEN -eq 0 ]]; then
+  ok broken-link "No broken wikilinks detected"
+fi
+
+# --- Output ---
+echo "=== wiki-health: $WIKI ==="
+echo ""
+
+if [[ "$JSON_MODE" == true ]]; then
+  echo '{"wiki":"'"$WIKI"'","errors":'"$ERRORS"',"warnings":'"$WARNINGS"',"results":['
+  FIRST=true
+  for r in "${REPORT[@]}"; do
+    $FIRST && FIRST=false || echo ","
+    echo -n "  $(echo "$r" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read().strip()))')"
+  done
+  echo ""
+  echo "]}"
+else
+  for r in "${REPORT[@]}"; do
+    echo "  $r"
+  done
+  echo ""
+  echo "  Summary: $ERRORS error(s), $WARNINGS warning(s)"
+fi
+
+echo ""
+
+if [[ $ERRORS -gt 0 ]]; then
+  echo "HEALTH TASK"
+  echo "  The wiki has $ERRORS error(s) listed above that require agent attention."
+  echo "  Fix errors before warnings. Update wiki/log.md after repairs."
+  exit 2
+elif [[ $WARNINGS -gt 0 ]]; then
+  echo "HEALTH TASK"
+  echo "  The wiki has $WARNINGS warning(s) listed above. Review and fix as appropriate."
+  echo "  Update wiki/log.md after any repairs made."
+  exit 0
+else
+  echo "  Wiki is healthy. No action required."
+  exit 0
+fi

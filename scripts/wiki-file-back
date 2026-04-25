@@ -1,0 +1,119 @@
+#!/usr/bin/env bash
+# wiki-file-back — file a durable answer or output back into an agent-maintained wiki
+#
+# Usage:
+#   wiki-file-back --wiki <path> --content <file> [--type concept|synthesis|output] [--title <title>]
+#   echo "content" | wiki-file-back --wiki <path> --stdin [--type <type>] [--title <title>]
+#
+# Types:
+#   concept    → wiki/concepts/<slug>.md        (durable reusable idea or entity)
+#   synthesis  → wiki/syntheses/<date>-<slug>.md (cross-source analysis)
+#   output     → outputs/<date>-<slug>.md        (reusable generated answer)
+#
+# Output: structured file-back task for the agent. The agent writes the actual page.
+# Exit 0 = task ready. Exit 1 = error.
+
+set -euo pipefail
+
+WIKI=""
+CONTENT_FILE=""
+STDIN_MODE=false
+TYPE="output"
+TITLE=""
+
+usage() {
+  grep '^#' "$0" | grep -v '#!/' | sed 's/^# \{0,2\}//'
+  exit 1
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --wiki)    WIKI="$2";         shift 2 ;;
+    --content) CONTENT_FILE="$2"; shift 2 ;;
+    --stdin)   STDIN_MODE=true;   shift ;;
+    --type)    TYPE="$2";         shift 2 ;;
+    --title)   TITLE="$2";        shift 2 ;;
+    --help|-h) usage ;;
+    *) echo "Unknown argument: $1" >&2; exit 1 ;;
+  esac
+done
+
+if [[ -z "$WIKI" ]]; then
+  echo "ERROR: --wiki <path> is required" >&2
+  exit 1
+fi
+
+WIKI="$(realpath "$WIKI")"
+
+if [[ ! -f "$WIKI/README.md" ]]; then
+  echo "ERROR: $WIKI/README.md not found — is this a valid wiki root?" >&2
+  exit 1
+fi
+
+if [[ "$STDIN_MODE" == false && -z "$CONTENT_FILE" ]]; then
+  echo "ERROR: provide --content <file> or --stdin" >&2
+  exit 1
+fi
+
+if [[ -n "$CONTENT_FILE" ]]; then
+  CONTENT_FILE="$(realpath "$CONTENT_FILE")"
+  if [[ ! -f "$CONTENT_FILE" ]]; then
+    echo "ERROR: content file not found: $CONTENT_FILE" >&2
+    exit 1
+  fi
+fi
+
+# Validate type
+case "$TYPE" in
+  concept|synthesis|output) ;;
+  *) echo "ERROR: --type must be concept, synthesis, or output" >&2; exit 1 ;;
+esac
+
+DATE="$(date +%Y-%m-%d)"
+
+# Determine target path pattern
+case "$TYPE" in
+  concept)   TARGET_DIR="$WIKI/wiki/concepts";   TARGET_PATTERN="<descriptive-slug>.md" ;;
+  synthesis) TARGET_DIR="$WIKI/wiki/syntheses";  TARGET_PATTERN="${DATE}-<descriptive-slug>.md" ;;
+  output)    TARGET_DIR="$WIKI/outputs";          TARGET_PATTERN="${DATE}-<descriptive-slug>.md" ;;
+esac
+
+echo "=== wiki-file-back: $WIKI ==="
+echo ""
+echo "  Type:           $TYPE"
+echo "  Target dir:     $TARGET_DIR"
+echo "  Target pattern: $TARGET_PATTERN"
+if [[ -n "$TITLE" ]]; then
+  echo "  Title hint:     $TITLE"
+fi
+echo ""
+
+if [[ "$STDIN_MODE" == true ]]; then
+  echo "--- Content (from stdin) ---"
+  cat
+  echo ""
+else
+  echo "--- Content: $CONTENT_FILE ---"
+  cat "$CONTENT_FILE"
+  echo ""
+fi
+
+echo "FILE-BACK TASK"
+echo "  Wiki:    $WIKI"
+echo "  Action:  Using the content above, create a new $TYPE page."
+echo "           Target dir: $TARGET_DIR/"
+echo "           Choose a descriptive filename slug from the content."
+if [[ -n "$TITLE" ]]; then
+  echo "           Use title hint: $TITLE"
+fi
+echo ""
+echo "  Rules:"
+echo "    - Include explicit provenance (source session, date, how this was derived)"
+echo "    - For concept: cross-link to related concept and source pages"
+echo "    - For synthesis: list all source pages it draws from"
+echo "    - For output: note the question it answers"
+echo "    - Update wiki/concepts.md (concept), wiki/syntheses.md (synthesis),"
+echo "      or outputs/index.md (output) if these index files exist"
+echo "    - Append to wiki/log.md: date, type, filename, one-line description"
+echo "    - If qmd is available, run: qmd-cpu embed after writing the file"
+exit 0

@@ -1,0 +1,146 @@
+#!/usr/bin/env bash
+# wiki-ingest — detect and surface ingest candidates for an agent-maintained wiki
+#
+# Usage:
+#   wiki-ingest --wiki <path>                        # changed files in last 26h + coverage gaps
+#   wiki-ingest --wiki <path> --since <hours>        # changed files in last N hours
+#   wiki-ingest --wiki <path> --source <file>        # specific file only
+#   wiki-ingest --wiki <path> --all                  # full coverage gap scan (no git filter)
+#
+# Output: structured report for the agent to act on. Exit 0 = candidates found. Exit 1 = nothing to do.
+
+set -euo pipefail
+
+WIKI=""
+SOURCE=""
+SINCE=26
+ALL_MODE=false
+
+usage() {
+  grep '^#' "$0" | grep -v '#!/' | sed 's/^# \{0,2\}//'
+  exit 1
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --wiki)    WIKI="$2";   shift 2 ;;
+    --source)  SOURCE="$2"; shift 2 ;;
+    --since)   SINCE="$2";  shift 2 ;;
+    --all)     ALL_MODE=true; shift ;;
+    --help|-h) usage ;;
+    *) echo "Unknown argument: $1" >&2; exit 1 ;;
+  esac
+done
+
+if [[ -z "$WIKI" ]]; then
+  echo "ERROR: --wiki <path> is required" >&2
+  exit 1
+fi
+
+WIKI="$(realpath "$WIKI")"
+
+if [[ ! -f "$WIKI/README.md" ]]; then
+  echo "ERROR: $WIKI/README.md not found — is this a valid wiki root?" >&2
+  exit 1
+fi
+
+WORKSPACE="$(git -C "$WIKI" rev-parse --show-toplevel 2>/dev/null || echo "")"
+CANDIDATES=()
+
+echo "=== wiki-ingest: $WIKI ==="
+echo ""
+
+# --- Specific source mode ---
+if [[ -n "$SOURCE" ]]; then
+  SOURCE="$(realpath "$SOURCE")"
+  if [[ ! -f "$SOURCE" ]]; then
+    echo "ERROR: source file not found: $SOURCE" >&2
+    exit 1
+  fi
+  echo "[source] $SOURCE"
+  echo ""
+  echo "INGEST TASK"
+  echo "  Wiki:   $WIKI"
+  echo "  Source: $SOURCE"
+  echo "  Action: Read the source file. Create or update the matching source page"
+  echo "          in $WIKI/wiki/sources/. Update affected concept pages."
+  echo "          Keep provenance explicit. Append to wiki/log.md."
+  exit 0
+fi
+
+# --- Git-based changed file detection ---
+if [[ "$ALL_MODE" == false && -n "$WORKSPACE" ]]; then
+  echo "--- Changed files (last ${SINCE}h) ---"
+  WIKI_REL="${WIKI#$WORKSPACE/}"
+  # Find standing source dirs: everything under wiki root except wiki/ raw/ outputs/ templates/
+  CHANGED=$(git -C "$WORKSPACE" log --since="${SINCE} hours ago" \
+    --name-only --pretty=format: \
+    | grep -v '^$' | sort -u || true)
+
+  if [[ -n "$CHANGED" ]]; then
+    # Filter to files that are actual markdown in source-adjacent paths (not wiki/ itself)
+    while IFS= read -r f; do
+      full="$WORKSPACE/$f"
+      # Skip wiki/ outputs/ templates/ raw/ paths — those are compiled, not source
+      if echo "$f" | grep -qE '/(wiki|outputs|templates|raw)/'; then
+        continue
+      fi
+      if [[ -f "$full" && "$f" == *.md ]]; then
+        CANDIDATES+=("$full")
+        echo "  [changed] $f"
+      fi
+    done <<< "$CHANGED"
+  fi
+
+  if [[ ${#CANDIDATES[@]} -eq 0 ]]; then
+    echo "  (none)"
+  fi
+  echo ""
+fi
+
+# --- Coverage gap scan ---
+echo "--- Coverage gaps ---"
+if [[ -f "$WIKI/wiki/sources.md" ]]; then
+  INGESTED=$(grep -h "^provenance:" "$WIKI/wiki/sources/"*.md 2>/dev/null \
+    | sed 's/^provenance: *//' | sort -u || true)
+
+  GAP_COUNT=0
+  # Look for standing source dirs (heuristic: sibling dirs of the wiki root with .md files)
+  # Also check raw/inbox if present
+  for check_dir in "$WIKI/raw/inbox" "$(dirname "$WIKI")"; do
+    [[ -d "$check_dir" ]] || continue
+    while IFS= read -r f; do
+      rel="${f#$WORKSPACE/}"
+      if ! echo "$INGESTED" | grep -qF "$rel"; then
+        echo "  [uncovered] $rel"
+        CANDIDATES+=("$f")
+        ((GAP_COUNT++)) || true
+      fi
+    done < <(find "$check_dir" -maxdepth 2 -name "*.md" -not -path "*/wiki/*" \
+      -not -path "*/raw/ingested/*" -not -path "*/templates/*" 2>/dev/null | sort)
+  done
+
+  if [[ $GAP_COUNT -eq 0 ]]; then
+    echo "  (none detected)"
+  fi
+else
+  echo "  (wiki/sources.md not found — skipping coverage scan)"
+fi
+
+echo ""
+
+if [[ ${#CANDIDATES[@]} -eq 0 ]]; then
+  echo "RESULT: No ingest candidates found."
+  exit 1
+fi
+
+echo "INGEST TASK"
+echo "  Wiki:       $WIKI"
+echo "  Candidates: ${#CANDIDATES[@]} file(s) listed above"
+echo "  Action:     For each candidate: read the file, decide if worth ingesting,"
+echo "              create or update source page in wiki/sources/, update affected"
+echo "              concept pages, update wiki/sources.md and wiki/concepts.md,"
+echo "              update map pages if needed, append to wiki/log.md."
+echo "              Keep provenance explicit on every source page."
+echo "              If qmd is available, run: qmd-cpu embed after all ingests."
+exit 0
