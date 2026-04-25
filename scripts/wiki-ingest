@@ -2,10 +2,12 @@
 # wiki-ingest — detect and surface ingest candidates for an agent-maintained wiki
 #
 # Usage:
-#   wiki-ingest --wiki <path>                        # changed files in last 26h + coverage gaps
-#   wiki-ingest --wiki <path> --since <hours>        # changed files in last N hours
-#   wiki-ingest --wiki <path> --source <file>        # specific file only
-#   wiki-ingest --wiki <path> --all                  # full coverage gap scan (no git filter)
+#   wiki-ingest --wiki <path>                                  # changed files in last 26h
+#   wiki-ingest --wiki <path> --since <hours>                  # changed files in last N hours
+#   wiki-ingest --wiki <path> --source <file>                  # specific file only
+#   wiki-ingest --wiki <path> --all                            # raw/inbox scan only
+#   wiki-ingest --wiki <path> --all --corpus <path>            # raw/inbox + standing source corpus scan
+#   wiki-ingest --wiki <path> --since 48 --corpus <path>       # git diff + corpus coverage scan
 #
 # Output: structured report for the agent to act on. Exit 0 = candidates found. Exit 1 = nothing to do.
 
@@ -13,6 +15,7 @@ set -euo pipefail
 
 WIKI=""
 SOURCE=""
+CORPUS=""
 SINCE=26
 ALL_MODE=false
 
@@ -25,6 +28,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --wiki)    WIKI="$2";   shift 2 ;;
     --source)  SOURCE="$2"; shift 2 ;;
+    --corpus)  CORPUS="$2"; shift 2 ;;
     --since)   SINCE="$2";  shift 2 ;;
     --all)     ALL_MODE=true; shift ;;
     --help|-h) usage ;;
@@ -105,9 +109,9 @@ if [[ -f "$WIKI/wiki/sources.md" ]]; then
     | sed 's/^provenance: *//' | sort -u || true)
 
   GAP_COUNT=0
-  # Look for standing source dirs (heuristic: sibling dirs of the wiki root with .md files)
-  # Also check raw/inbox if present
-  for check_dir in "$WIKI/raw/inbox" "$(dirname "$WIKI")"; do
+
+  # Always check raw/inbox
+  for check_dir in "$WIKI/raw/inbox"; do
     [[ -d "$check_dir" ]] || continue
     while IFS= read -r f; do
       rel="${f#$WORKSPACE/}"
@@ -116,9 +120,28 @@ if [[ -f "$WIKI/wiki/sources.md" ]]; then
         CANDIDATES+=("$f")
         ((GAP_COUNT++)) || true
       fi
-    done < <(find "$check_dir" -maxdepth 2 -name "*.md" -not -path "*/wiki/*" \
-      -not -path "*/raw/ingested/*" -not -path "*/templates/*" 2>/dev/null | sort)
+    done < <(find "$check_dir" -name "*.md" 2>/dev/null | sort)
   done
+
+  # If --corpus specified, scan that too
+  if [[ -n "$CORPUS" ]]; then
+    CORPUS="$(realpath "$CORPUS")"
+    if [[ ! -d "$CORPUS" ]]; then
+      echo "  ERROR: --corpus path not found: $CORPUS" >&2
+    else
+      while IFS= read -r f; do
+        rel="${f#$WORKSPACE/}"
+        if ! echo "$INGESTED" | grep -qF "$rel"; then
+          echo "  [uncovered] $rel"
+          CANDIDATES+=("$f")
+          ((GAP_COUNT++)) || true
+        fi
+      done < <(find "$CORPUS" -name "*.md" -not -path "*/wiki/*" \
+        -not -path "*/raw/ingested/*" -not -path "*/templates/*" 2>/dev/null | sort)
+    fi
+  elif [[ "$ALL_MODE" == true ]]; then
+    echo "  (no --corpus specified; only raw/inbox scanned — use --corpus <path> for standing source coverage)"
+  fi
 
   if [[ $GAP_COUNT -eq 0 ]]; then
     echo "  (none detected)"
