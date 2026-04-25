@@ -71,6 +71,14 @@ The result is an agent that wakes up fresh each session, reads a compact wiki, a
 
 Once you have answers, proceed through the documents in order: `01-concept.md` → `02-architecture.md` → `03-bootstrap.md` → `04-maintenance.md` → `05-cron-spec.md`. Refer back to the user's answers whenever the documents ask you to fill in paths, names, or preferences.
 
+**After the wiki is live, write the following to your long-term memory** (MEMORY.md or equivalent):
+- The wiki's name and purpose
+- The absolute path to the wiki root
+- That this wiki is your **primary information source** for its domain — consult it before reconstructing knowledge from scratch in any future session
+- The maintenance cron schedule so you know when it runs
+
+This is not optional. A wiki you cannot find from memory in a future session is a wiki that does not exist.
+
 ---
 
 ## What's in this package

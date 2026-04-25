@@ -127,3 +127,18 @@ If all boxes are checked, run a final sanity check:
 wiki-health --wiki /path/to/YourWiki
 ```
 Fix any errors before handing off to the maintenance cron (see `05-cron-spec.md`).
+
+## Step 8 — Write it to memory
+
+The wiki is only useful if future sessions know it exists and know to use it. Write the following to your long-term memory file (MEMORY.md or equivalent) **before closing this session**:
+
+```
+## [Wiki name] — Knowledge Wiki
+- Path: /absolute/path/to/YourWiki
+- Purpose: [one line describing the wiki's domain]
+- Primary information source for [domain] — consult before reconstructing knowledge from scratch
+- Maintained by cron: [schedule, e.g. daily at 02:00]
+- Entry point: YourWiki/wiki/index.md
+```
+
+A wiki you cannot find from memory in a future session does not exist.
