@@ -36,7 +36,7 @@ An agent can read a dense source document, extract what is durable and reusable,
 
 Andrej Karpathy has written about the idea that LLMs work well as personal knowledge management systems — they can read sources, synthesise knowledge, and maintain structured notes in a way that integrates naturally with how agents already operate. The wiki pattern takes this observation seriously and builds a production-grade implementation around it.
 
-The key insight worth preserving: **optimise for AI retrieval first, human navigation second.** The pages should be written in a way that makes it easy for the agent to find and use the right knowledge, not primarily in a way that looks pretty in a UI.
+The key insight worth preserving: **this wiki exists for the agent, not for the human.** The agent is the primary reader, the primary writer, and the primary beneficiary. Human readability is a side effect of using plain markdown — a convenient one, but not the design goal. Pages should be structured to make it easy for the agent to find and use the right knowledge: clear titles, explicit provenance, tight scope per page, dense cross-links. A page that is easy for a human to skim but hard for an agent to retrieve correctly is a bad page.
 
 ## Core principles
 

@@ -28,6 +28,8 @@ The pattern is simple:
 
 The result is an agent that wakes up fresh each session, reads a compact wiki, and operates from curated knowledge rather than reconstructing everything from scratch every time.
 
+**The primary purpose of the wiki is to be the agent's information source.** It is built by the agent, for the agent. Human readability is a welcome side effect — not the goal. Design decisions (page size, link density, provenance metadata, index structure) should optimise for what makes it easy for the agent to find and use the right knowledge, not for what looks clean in a UI.
+
 ## Key concepts
 
 **Standing source corpus** — the folder(s) of documents your agent treats as its primary knowledge input. Think of it as the raw material pile: notes, reports, specs, anything you have accumulated that contains knowledge worth keeping. Your existing Obsidian vault, or a subfolder of it, is a natural fit — point the agent at it and it will start ingesting from what you already have. The corpus itself is never modified — it is read-only input. As you add or update files in the corpus, the maintenance job picks them up automatically.
