@@ -82,6 +82,25 @@ Skip on genuine no-op runs. Skip entirely if qmd is not installed.
 - Failed or blocked → send one concise error summary to same target; then `NO_REPLY`
 - Never send more than one message per run
 
+## Session sweep (write-back)
+
+At the end of any substantive session, the human sends a closing signal (e.g. `/wiki-done`, or whatever convention fits the platform). The agent then:
+
+1. Reviews the conversation for durable, generalisable knowledge not already in the wiki
+2. If nothing qualifies → logs a no-op entry and stops
+3. If anything qualifies → creates a dated session source page (`wiki/sources/YYYY-MM-DD-session-<topic>.md`) with `provenance: conversation YYYY-MM-DD`
+4. Files qualifying content back using `wiki-file-back` or direct page creation; applies same tier rules as any ingest
+5. Updates index files as needed; appends to `wiki/log.md`
+
+**Trigger options (in order of reliability):**
+- *Explicit closing signal* — human sends a single consistent signal; agent runs the sweep before closing
+- *Start-of-session sweep* — at the top of each new session, agent checks `wiki/log.md`; if no session source page exists since the last ingest, sweeps what changed
+- *Periodic cron sweep* — maintenance cron flags an unswept session if the corpus changed since the last log entry (safety net)
+
+**Fallback:** if the previous session ended without a closing signal, check at the start of the next session and ask whether a sweep is needed.
+
+See `skills/wiki-done/` for a platform-adaptable closing-signal skill template.
+
 ## Remote / fetch-source content detection
 
 Remote sources fetched via web, API, or MCP have no `mtime`. Each fetch-source page must declare its own detection signal in a `## Detection` section. Standard patterns:
