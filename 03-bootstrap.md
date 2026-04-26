@@ -15,7 +15,7 @@ This is a one-time procedure. Maintenance (ongoing ingestion and upkeep) is cove
 - A folder inside your vault or workspace to host the wiki (e.g. `YourWiki/`)
 - At least one folder of existing source material to ingest from (can be empty — but you need somewhere to point the standing-source step)
 - An agent with read/write access to the workspace
-- **Git** — the source corpus folder must be tracked in a git repository. The maintenance scripts use `git log` to detect changed files. If your workspace is not already a git repo, run `git init` and make an initial commit before proceeding.
+- **Git** (recommended, not required) — if your workspace is tracked in a git repository, the maintenance scripts use `git log` to detect recently changed files. If git is not available or your files predate the first commit, the mtime-per-file staleness audit covers detection instead. If you want git-based detection: run `git init` and make an initial commit before proceeding.
 
 ## Step 1 — Create the folder structure
 
@@ -76,7 +76,7 @@ Initial wiki structure created. No sources ingested yet.
 
 If the bundled scripts are installed, run:
 ```bash
-wiki-ingest --wiki /path/to/YourWiki --all
+wiki-ingest --wiki /path/to/YourWiki --all --corpus /path/to/your/source/corpus
 ```
 This scans the full source corpus for uncovered files and outputs a structured ingest task for your agent to act on.
 

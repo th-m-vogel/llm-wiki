@@ -39,7 +39,27 @@ This gives you an exact, deduplicated list of files that were **added or modifie
 
 If the git log returns nothing, cross-reference Step 1 gaps before concluding there is nothing to do.
 
-**This requires git.** Your source corpus must be tracked in a git repository. If it is not, use `find -newer [last-run-sentinel-file] -type f` as an alternative, updating the sentinel file at the end of each run.
+**This requires git history.** If your workspace has no commits yet, or if source files predate the first commit, the git log will return nothing even when files have changed. In that case — or as a complement — use the mtime-per-file audit below.
+
+**Mtime-per-file audit (use when git history is absent or incomplete):**
+```bash
+find /path/to/source/corpus -name '*.md' | while read src; do
+  # grep for this filename in wiki source pages
+  match=$(grep -rl "$(basename "$src" .md)" /path/to/wiki/sources/ 2>/dev/null | head -1)
+  if [ -z "$match" ]; then
+    echo "UNCOVERED: $src"
+  else
+    src_mtime=$(stat -c '%Y' "$src")
+    wiki_mtime=$(stat -c '%Y' "$match")
+    if [ "$src_mtime" -gt "$wiki_mtime" ]; then
+      echo "STALE: $src"
+    fi
+  fi
+done
+```
+This checks each source file individually against its corresponding wiki source page. UNCOVERED = never ingested. STALE = source is newer than its wiki page. Both are ingest candidates.
+
+Run both approaches and combine results (deduplicated). The git log catches recent changes precisely; the mtime audit catches accumulated staleness the git window cannot see.
 
 ### Step 3 — Ingest and update
 
@@ -176,7 +196,7 @@ STEP 2 — Run: wiki-ingest --wiki /path/to/YourWiki
          Act on the listed candidates.
 ```
 
-This is optional — the git log approach in Step 2 of the four-step procedure works fine without these tools. The tools add convenience and a more structured output format.
+Using `wiki-ingest --corpus <path>` is the recommended approach: it combines git-based detection with uncovered and mtime-based staleness scanning in one pass. The manual methods in Step 2 of this document are the fallback when the scripts are not installed.
 
 ## What maintenance is NOT
 
@@ -188,8 +208,10 @@ This is optional — the git log approach in Step 2 of the four-step procedure w
 
 | Failure | Effect | Prevention |
 |---------|--------|------------|
-| Only checking new files, not changed files | Updated sources produce stale wiki pages | Always run the git diff step |
+| Only checking new files, not changed files | Updated sources produce stale wiki pages | Always run git diff + mtime audit |
+| Files predate git history or first commit | git log returns nothing; changes invisible | Use mtime-per-file audit as primary when git history is absent |
 | Ingesting everything regardless of value | Wiki fills with noise, retrieval degrades | Apply ingest decision rules |
 | Skipping the log | No audit trail; no way to know what was checked | Log every run, including no-ops |
-| Re-ingesting unchanged files | Wasted compute, unnecessary log noise | Anchor the git diff to the last run window |
+| Logging success before writes complete | Ghost log entries: log claims update, file never written | Write log entry last, after all file operations; next mtime audit will re-flag stale files |
+| Re-ingesting unchanged files | Wasted compute, unnecessary log noise | Anchor the git diff to the last run window; mtime audit self-corrects |
 | Not refreshing the semantic index | Search returns stale results | Run embed after every real ingest |

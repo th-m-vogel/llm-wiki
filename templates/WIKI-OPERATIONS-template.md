@@ -16,17 +16,32 @@ If the tool is not installed, manually check:
 
 ### Step 2 — Detect changed and new source files
 ```bash
-wiki-ingest --wiki /absolute/path/to/YourWiki
+wiki-ingest --wiki /absolute/path/to/YourWiki --corpus /absolute/path/to/source/corpus
 ```
-This runs a git diff (last 26h) against the standing source corpus and surfaces coverage gaps.
+This detects uncovered files (never ingested), stale files (source newer than its wiki page), and recent git changes. The `--corpus` flag is required for standing source staleness and coverage scanning — without it only `raw/inbox` is checked.
+
 Treat every listed file as a candidate for ingest or re-ingest — including previously ingested files that have since been updated.
 
-If the tool is not installed, run manually:
+If the tool is not installed, run both methods manually and combine results:
+
+**Method A — mtime-per-file audit (primary; works even without git history):**
+```bash
+find /absolute/path/to/source/corpus -name '*.md' | while read src; do
+  match=$(grep -rl "$(basename "$src" .md)" /absolute/path/to/YourWiki/wiki/sources/ 2>/dev/null | head -1)
+  if [ -z "$match" ]; then echo "UNCOVERED: $src"
+  else
+    [ $(stat -c '%Y' "$src") -gt $(stat -c '%Y' "$match") ] && echo "STALE: $src"
+  fi
+done
+```
+
+**Method B — git log (catches recent changes when history exists):**
 ```bash
 git -C /path/to/workspace log --since="26 hours ago" \
   --name-only --pretty=format: -- path/to/source/corpus/ \
   | sort -u | grep -v '^$'
 ```
+If git has no history or exits non-zero, skip silently — Method A already covers this case.
 
 ### Step 3 — Ingest and update
 For each candidate from Steps 1 and 2:

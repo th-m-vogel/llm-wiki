@@ -60,13 +60,30 @@ If wiki-health is not installed, check manually: provenance frontmatter on sourc
 pages, wiki/log.md recency, and raw/inbox/ for unprocessed files.
 
 STEP 2 — Detect changed and new source files
-Run: wiki-ingest --wiki [/absolute/path/to/YourWiki]
+Run: wiki-ingest --wiki [/absolute/path/to/YourWiki] --corpus [/absolute/path/to/source/corpus]
 Treat every listed file as a candidate for ingest or re-ingest,
 including previously ingested files that have been updated.
-If wiki-ingest is not installed, run manually:
+The --corpus flag is required to detect stale and uncovered standing-source files.
+
+If wiki-ingest is not installed, run both detection methods and combine results:
+
+Method A — mtime-per-file audit (primary; works even without git history):
+  find [/absolute/path/to/source/corpus] -name '*.md' | while read src; do
+    match=$(grep -rl "$(basename "$src" .md)" [/absolute/path/to/YourWiki/wiki/sources/] 2>/dev/null | head -1)
+    if [ -z "$match" ]; then echo "UNCOVERED: $src"
+    else
+      [ $(stat -c '%Y' "$src") -gt $(stat -c '%Y' "$match") ] && echo "STALE: $src"
+    fi
+  done
+
+Method B — git log (catches precise recent changes when history exists):
   git -C [/absolute/path/to/workspace] log --since="26 hours ago" \
     --name-only --pretty=format: -- [relative/path/to/source/corpus/] \
     | sort -u | grep -v '^$'
+  If git has no history or exits non-zero, skip silently.
+
+Combine results from both methods (deduplicated). UNCOVERED and STALE files
+from Method A, plus git results from Method B, form the final candidate list.
 
 STEP 3 — Ingest and update
 For any material worth ingesting (new or updated): create/update source pages
@@ -134,4 +151,4 @@ After the first few runs, check:
 2. **Token usage** — if very high, tighten the prompt or reduce the scope per run
 3. **Log entries** — confirm the agent is actually appending to `wiki/log.md` each run
 4. **Source page provenance** — spot-check that `provenance:` fields are accurate and not hallucinated
-5. **No-op rate** — if every run is a no-op, check whether the git diff step is working correctly
+5. **No-op rate** — if every run is a no-op, check whether the staleness detection is working correctly: confirm `wiki-ingest` is receiving `--corpus`, and verify mtime audit output by running the script manually

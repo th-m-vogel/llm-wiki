@@ -102,52 +102,59 @@ if [[ "$ALL_MODE" == false && -n "$WORKSPACE" ]]; then
   echo ""
 fi
 
-# --- Coverage gap scan ---
-echo "--- Coverage gaps ---"
-if [[ -f "$WIKI/wiki/sources.md" ]]; then
-  INGESTED=$(grep -h "^provenance:" "$WIKI/wiki/sources/"*.md 2>/dev/null \
-    | sed 's/^provenance: *//' | sort -u || true)
-
+# --- Coverage gap scan + mtime staleness check ---
+echo "--- Coverage gaps and staleness ---"
+if [[ -d "$WIKI/wiki/sources" ]]; then
   GAP_COUNT=0
 
-  # Always check raw/inbox
+  # Always check raw/inbox for uncovered files
   for check_dir in "$WIKI/raw/inbox"; do
     [[ -d "$check_dir" ]] || continue
     while IFS= read -r f; do
-      rel="${f#$WORKSPACE/}"
-      if ! echo "$INGESTED" | grep -qF "$rel"; then
-        echo "  [uncovered] $rel"
+      stem="$(basename "$f" .md)"
+      match=$(grep -rl "$stem" "$WIKI/wiki/sources/" 2>/dev/null | head -1)
+      if [[ -z "$match" ]]; then
+        echo "  [uncovered] $f"
         CANDIDATES+=("$f")
         ((GAP_COUNT++)) || true
       fi
     done < <(find "$check_dir" -name "*.md" 2>/dev/null | sort)
   done
 
-  # If --corpus specified, scan that too
+  # If --corpus specified, scan for uncovered AND stale files
   if [[ -n "$CORPUS" ]]; then
     CORPUS="$(realpath "$CORPUS")"
     if [[ ! -d "$CORPUS" ]]; then
       echo "  ERROR: --corpus path not found: $CORPUS" >&2
     else
       while IFS= read -r f; do
-        rel="${f#$WORKSPACE/}"
-        if ! echo "$INGESTED" | grep -qF "$rel"; then
-          echo "  [uncovered] $rel"
+        stem="$(basename "$f" .md)"
+        match=$(grep -rl "$stem" "$WIKI/wiki/sources/" 2>/dev/null | head -1)
+        if [[ -z "$match" ]]; then
+          echo "  [uncovered] $f"
           CANDIDATES+=("$f")
           ((GAP_COUNT++)) || true
+        else
+          src_mtime=$(stat -c '%Y' "$f")
+          wiki_mtime=$(stat -c '%Y' "$match")
+          if [[ "$src_mtime" -gt "$wiki_mtime" ]]; then
+            echo "  [stale] $f  (source newer than $(basename "$match"))"
+            CANDIDATES+=("$f")
+            ((GAP_COUNT++)) || true
+          fi
         fi
       done < <(find "$CORPUS" -name "*.md" -not -path "*/wiki/*" \
         -not -path "*/raw/ingested/*" -not -path "*/templates/*" 2>/dev/null | sort)
     fi
   elif [[ "$ALL_MODE" == true ]]; then
-    echo "  (no --corpus specified; only raw/inbox scanned — use --corpus <path> for standing source coverage)"
+    echo "  (no --corpus specified; only raw/inbox scanned — use --corpus <path> for standing source staleness + coverage)"
   fi
 
   if [[ $GAP_COUNT -eq 0 ]]; then
     echo "  (none detected)"
   fi
 else
-  echo "  (wiki/sources.md not found — skipping coverage scan)"
+  echo "  (wiki/sources/ not found — skipping coverage and staleness scan)"
 fi
 
 echo ""
