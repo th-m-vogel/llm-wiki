@@ -111,8 +111,8 @@ if [[ -d "$WIKI/wiki/sources" ]]; then
   for check_dir in "$WIKI/raw/inbox"; do
     [[ -d "$check_dir" ]] || continue
     while IFS= read -r f; do
-      stem="$(basename "$f" .md)"
-      match=$(grep -rl "$stem" "$WIKI/wiki/sources/" 2>/dev/null | head -1)
+      rel="${f#$WORKSPACE/}"
+      match=$(grep -rl "$rel" "$WIKI/wiki/sources/" 2>/dev/null | head -1)
       if [[ -z "$match" ]]; then
         echo "  [uncovered] $f"
         CANDIDATES+=("$f")
@@ -128,8 +128,10 @@ if [[ -d "$WIKI/wiki/sources" ]]; then
       echo "  ERROR: --corpus path not found: $CORPUS" >&2
     else
       while IFS= read -r f; do
-        stem="$(basename "$f" .md)"
-        match=$(grep -rl "$stem" "$WIKI/wiki/sources/" 2>/dev/null | head -1)
+        # Use relative path from workspace root for matching — basename matching
+        # causes false positives when multiple files share the same name (e.g. README.md)
+        rel="${f#$WORKSPACE/}"
+        match=$(grep -rl "$rel" "$WIKI/wiki/sources/" 2>/dev/null | head -1)
         if [[ -z "$match" ]]; then
           echo "  [uncovered] $f"
           CANDIDATES+=("$f")
