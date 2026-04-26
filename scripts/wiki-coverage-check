@@ -1,0 +1,131 @@
+#!/usr/bin/env bash
+# wiki-coverage-check — source coverage tracking for an agent-maintained wiki
+#
+# Reports which source corpus .md files are:
+#   [covered]        - mentioned in the coverage page AND have a provenance entry
+#   [provenance-only] - ingested (found in wiki source provenance: fields) but missing from coverage page
+#   [uncovered]      - not found in coverage page or any provenance field
+#
+# Usage:
+#   wiki-coverage-check --wiki <path> --corpus <path> [--coverage <page>] [--json]
+#
+# Arguments:
+#   --wiki      Path to the wiki root (must contain wiki/sources/)
+#   --corpus    Path to the source corpus directory to scan
+#   --coverage  Path to the coverage page (optional; omit to skip coverage-page check)
+#   --json      Machine-readable JSON output
+#
+# Note: matching uses relative paths from workspace root, not basenames.
+# Basename matching causes false positives when multiple files share the same
+# filename (e.g. README.md in sub-directories).
+
+set -euo pipefail
+
+WIKI=""
+CORPUS=""
+COVERAGE_PAGE=""
+JSON=0
+
+usage() {
+  grep '^#' "$0" | grep -v '#!/' | sed 's/^# \{0,2\}//'
+  exit 1
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --wiki)     WIKI="$2";          shift 2 ;;
+    --corpus)   CORPUS="$2";        shift 2 ;;
+    --coverage) COVERAGE_PAGE="$2"; shift 2 ;;
+    --json)     JSON=1;             shift ;;
+    --help|-h)  usage ;;
+    *) echo "Unknown argument: $1" >&2; exit 1 ;;
+  esac
+done
+
+if [[ -z "$WIKI" || -z "$CORPUS" ]]; then
+  echo "ERROR: --wiki and --corpus are required" >&2
+  exit 1
+fi
+
+WIKI="$(realpath "$WIKI")"
+CORPUS="$(realpath "$CORPUS")"
+WIKI_SOURCES_DIR="$WIKI/wiki/sources"
+
+# Infer workspace root as the common ancestor of wiki and corpus
+WORKSPACE="$(git -C "$WIKI" rev-parse --show-toplevel 2>/dev/null || echo "")"
+if [[ -z "$WORKSPACE" ]]; then
+  # Fall back: find common path prefix
+  WORKSPACE="$(dirname "$WIKI")"
+  while [[ ! "$CORPUS" == "$WORKSPACE"* ]] && [[ "$WORKSPACE" != "/" ]]; do
+    WORKSPACE="$(dirname "$WORKSPACE")"
+  done
+fi
+
+if [[ -n "$COVERAGE_PAGE" ]]; then
+  COVERAGE_PAGE="$(realpath "$COVERAGE_PAGE")"
+fi
+
+# Collect all candidate source files
+mapfile -t all_files < <(find "$CORPUS" -name '*.md' | sort)
+
+covered=()
+provenance_only=()
+uncovered=()
+
+for f in "${all_files[@]}"; do
+  rel="${f#$WORKSPACE/}"   # relative path from workspace root — used for matching
+
+  in_coverage=0
+  in_provenance=0
+
+  # Check coverage page — relative path only
+  if [[ -n "$COVERAGE_PAGE" ]] && grep -qF "$rel" "$COVERAGE_PAGE" 2>/dev/null; then
+    in_coverage=1
+  fi
+
+  # Check provenance fields in wiki source pages — relative path only
+  if grep -rqF "$rel" "$WIKI_SOURCES_DIR" 2>/dev/null; then
+    in_provenance=1
+  fi
+
+  if [[ $in_coverage -eq 1 ]]; then
+    covered+=("$rel")
+  elif [[ $in_provenance -eq 1 ]]; then
+    provenance_only+=("$rel")
+  else
+    uncovered+=("$rel")
+  fi
+done
+
+if [[ $JSON -eq 1 ]]; then
+  printf '{\n'
+  printf '  "covered": [\n'
+  for f in "${covered[@]:-}"; do [[ -n "$f" ]] && printf '    "%s",\n' "$f"; done | sed '$ s/,$//'
+  printf '  ],\n'
+  printf '  "provenance_only": [\n'
+  for f in "${provenance_only[@]:-}"; do [[ -n "$f" ]] && printf '    "%s",\n' "$f"; done | sed '$ s/,$//'
+  printf '  ],\n'
+  printf '  "uncovered": [\n'
+  for f in "${uncovered[@]:-}"; do [[ -n "$f" ]] && printf '    "%s",\n' "$f"; done | sed '$ s/,$//'
+  printf '  ]\n'
+  printf '}\n'
+else
+  printf '\n=== WIKI COVERAGE REPORT ===\n\n'
+  printf 'Wiki:    %s\n' "$WIKI"
+  printf 'Corpus:  %s\n' "$CORPUS"
+  [[ -n "$COVERAGE_PAGE" ]] && printf 'Coverage page: %s\n' "$COVERAGE_PAGE"
+  printf '\n'
+
+  printf '[covered] — in coverage page + provenance: %d\n' "${#covered[@]}"
+  for f in "${covered[@]:-}"; do [[ -n "$f" ]] && printf '  ✓  %s\n' "$f"; done
+
+  printf '\n[provenance-only] — ingested but MISSING from coverage page: %d\n' "${#provenance_only[@]}"
+  for f in "${provenance_only[@]:-}"; do [[ -n "$f" ]] && printf '  ⚠  %s\n' "$f"; done
+
+  printf '\n[uncovered] — not ingested or tracked: %d\n' "${#uncovered[@]}"
+  for f in "${uncovered[@]:-}"; do [[ -n "$f" ]] && printf '  ✗  %s\n' "$f"; done
+
+  total=${#all_files[@]}
+  printf '\nTotal: %d files | covered: %d | provenance-only: %d | uncovered: %d\n' \
+    "$total" "${#covered[@]}" "${#provenance_only[@]}" "${#uncovered[@]}"
+fi

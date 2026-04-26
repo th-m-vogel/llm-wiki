@@ -26,13 +26,17 @@ If the tool is not installed, run both methods manually and combine results:
 
 **Method A — mtime-per-file audit (primary; works even without git history):**
 ```bash
+WORKSPACE=/absolute/path/to/workspace
 find /absolute/path/to/source/corpus -name '*.md' | while read src; do
-  match=$(grep -rl "$(basename "$src" .md)" /absolute/path/to/YourWiki/wiki/sources/ 2>/dev/null | head -1)
+  rel="${src#$WORKSPACE/}"
+  match=$(grep -rl "$rel" /absolute/path/to/YourWiki/wiki/sources/ 2>/dev/null | head -1)
   if [ -z "$match" ]; then echo "UNCOVERED: $src"
   else
     [ $(stat -c '%Y' "$src") -gt $(stat -c '%Y' "$match") ] && echo "STALE: $src"
   fi
 done
+# Note: match on relative path, not basename — basename matching causes false
+# positives when multiple source files share the same filename (e.g. README.md).
 ```
 
 **Method B — git log (catches recent changes when history exists):**
@@ -78,6 +82,27 @@ Skip on genuine no-op runs. Skip entirely if qmd is not installed.
 - Failed or blocked → send one concise error summary to same target; then `NO_REPLY`
 - Never send more than one message per run
 
+## Remote / fetch-source content detection
+
+Remote sources fetched via web, API, or MCP have no `mtime`. Each fetch-source page must declare its own detection signal in a `## Detection` section. Standard patterns:
+
+- **version-string** — embedded date/version string in the page; compare to `document_version` in frontmatter
+- **url-date** — URL encodes the time period; detection is an existence check on the source page
+- **content-diff** — no version string; diff the relevant structure against the stored wiki content
+- **periodic** — re-fetch unconditionally each run (use sparingly)
+
+See `templates/fetch-source.md` for the complete fetch-source page template.
+
+## Scheduled maintenance
+
+For automated wiki maintenance on a schedule:
+
+- **OpenClaw cron** — preferred when running inside an OpenClaw deployment; cron jobs are persistent and managed by the gateway
+- **systemd user timer** — recommended fallback on Linux when persistent cron is not available (`systemctl --user`)
+- **crontab** — fallback on any POSIX system when systemd is not available (`crontab -e`)
+
+Do not rely on session-scoped or ephemeral scheduling for recurring maintenance tasks.
+
 ## What to avoid
 
 - Do not treat chat history as a durable source of truth
@@ -85,3 +110,4 @@ Skip on genuine no-op runs. Skip entirely if qmd is not installed.
 - Do not leave useful synthesis only in conversation — file it back with `wiki-file-back`
 - Do not edit past log entries — the log is an audit trail
 - Do not ingest speculatively — if unsure, log a no-op review and move on
+- Do not use basename-only matching for source coverage — use relative paths to avoid false positives when multiple source files share the same filename

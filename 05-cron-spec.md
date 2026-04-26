@@ -4,10 +4,24 @@
 
 The maintenance job is a scheduled agent turn that runs the four-step procedure from `04-maintenance.md` automatically. It requires:
 
-- An OpenClaw-compatible gateway (or equivalent agent scheduler)
+- A scheduler (see options below)
 - A persistent or isolated session for the agent to run in
 - Read/write tool access to the wiki and source corpus
 - `exec` access for the git diff and optional qmd commands
+
+## Scheduler options
+
+Choose based on what is available in your environment:
+
+| Option | When to use |
+|--------|-------------|
+| **OpenClaw cron** | Running inside an OpenClaw deployment. Cron jobs are persistent and gateway-managed. Recommended. |
+| **systemd user timer** | Linux host without OpenClaw persistent cron. Run `systemctl --user` to manage. |
+| **crontab** | Any POSIX system where systemd is not available. Run `crontab -e` to manage. |
+
+Do not rely on session-scoped or ephemeral scheduling mechanisms for recurring maintenance tasks — they will not survive restarts.
+
+The JSON spec below is OpenClaw-specific. For systemd or crontab deployments, adapt the schedule expression and invocation to your platform.
 
 ## Minimal cron job definition
 
@@ -68,13 +82,17 @@ The --corpus flag is required to detect stale and uncovered standing-source file
 If wiki-ingest is not installed, run both detection methods and combine results:
 
 Method A — mtime-per-file audit (primary; works even without git history):
+  WORKSPACE=[/absolute/path/to/workspace]
   find [/absolute/path/to/source/corpus] -name '*.md' | while read src; do
-    match=$(grep -rl "$(basename "$src" .md)" [/absolute/path/to/YourWiki/wiki/sources/] 2>/dev/null | head -1)
+    rel="${src#$WORKSPACE/}"
+    match=$(grep -rl "$rel" [/absolute/path/to/YourWiki/wiki/sources/] 2>/dev/null | head -1)
     if [ -z "$match" ]; then echo "UNCOVERED: $src"
     else
       [ $(stat -c '%Y' "$src") -gt $(stat -c '%Y' "$match") ] && echo "STALE: $src"
     fi
   done
+  # Note: match on relative path, not basename, to avoid false positives when
+  # multiple source files share the same filename (e.g. README.md in sub-dirs).
 
 Method B — git log (catches precise recent changes when history exists):
   git -C [/absolute/path/to/workspace] log --since="26 hours ago" \

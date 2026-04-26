@@ -43,9 +43,11 @@ If the git log returns nothing, cross-reference Step 1 gaps before concluding th
 
 **Mtime-per-file audit (use when git history is absent or incomplete):**
 ```bash
+WORKSPACE=/path/to/workspace
 find /path/to/source/corpus -name '*.md' | while read src; do
-  # grep for this filename in wiki source pages
-  match=$(grep -rl "$(basename "$src" .md)" /path/to/wiki/sources/ 2>/dev/null | head -1)
+  rel="${src#$WORKSPACE/}"
+  # Match against relative path in provenance fields (not basename — see note below)
+  match=$(grep -rl "$rel" /path/to/wiki/sources/ 2>/dev/null | head -1)
   if [ -z "$match" ]; then
     echo "UNCOVERED: $src"
   else
@@ -58,6 +60,8 @@ find /path/to/source/corpus -name '*.md' | while read src; do
 done
 ```
 This checks each source file individually against its corresponding wiki source page. UNCOVERED = never ingested. STALE = source is newer than its wiki page. Both are ingest candidates.
+
+> **Note — use relative paths, not basenames.** Matching on `basename` (e.g. `README.md`) causes false positives when multiple source files share the same filename across sub-directories. Always match on the relative path from the workspace root, which must appear in wiki source `provenance:` frontmatter fields.
 
 Run both approaches and combine results (deduplicated). The git log catches recent changes precisely; the mtime audit catches accumulated staleness the git window cannot see.
 
@@ -204,12 +208,26 @@ Using `wiki-ingest --corpus <path>` is the recommended approach: it combines git
 - **It is not a redesign session.** If you notice structural problems, log them and handle them separately.
 - **It is not optional.** A wiki without maintenance is a wiki on its way to being useless.
 
+## Remote / fetch-source content detection
+
+Remote sources fetched via web, API, or MCP have no `mtime`. Each fetch-source page must declare its own detection signal in a `## Detection` section. Standard patterns:
+
+- **version-string** — the page contains an embedded date/version string (e.g. `Last updated: 2026-04-13`). Fetch the page, extract that string, compare to `document_version` in the source page frontmatter. If newer → re-ingest.
+- **url-date** — the URL encodes the time period (e.g. `/april-2026`). Detection is an existence check: if no source page exists for the current period → fetch and ingest.
+- **content-diff** — no version string available. Fetch the live page, diff the relevant structure (API names, endpoint URLs, section headings, etc.) against what is stored in the wiki. Any addition or change is the trigger. Document what to diff in the Detection section.
+- **periodic** — re-fetch unconditionally on each run. Use sparingly.
+
+If no detection signal is declared, fall back to the `refresh` interval in the fetch-source frontmatter.
+
+See `templates/fetch-source.md` for the complete fetch-source page template.
+
 ## Failure modes to avoid
 
 | Failure | Effect | Prevention |
 |---------|--------|------------|
 | Only checking new files, not changed files | Updated sources produce stale wiki pages | Always run git diff + mtime audit |
 | Files predate git history or first commit | git log returns nothing; changes invisible | Use mtime-per-file audit as primary when git history is absent |
+| Basename matching in mtime audit | False positives when files share a name (e.g. `README.md` in sub-dirs) | Match on relative path, not basename |
 | Ingesting everything regardless of value | Wiki fills with noise, retrieval degrades | Apply ingest decision rules |
 | Skipping the log | No audit trail; no way to know what was checked | Log every run, including no-ops |
 | Logging success before writes complete | Ghost log entries: log claims update, file never written | Write log entry last, after all file operations; next mtime audit will re-flag stale files |
