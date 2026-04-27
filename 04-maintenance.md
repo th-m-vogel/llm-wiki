@@ -196,6 +196,25 @@ ERRORS require immediate repair. WARNINGs indicate navigational drift or quality
 
 Exit 0 = healthy or warnings only. Exit 2 = errors found.
 
+### `wiki-lint` (semantic pass)
+
+A separate LLM-driven quality pass that runs on explicit request or when enough new content has accumulated (default threshold: 10 new source pages since last lint pass). Not part of the daily maintenance cron — deliberate and periodic.
+
+```bash
+# Trigger explicitly — no CLI tool; invoke via skill or manual prompt
+# See skills/wiki-lint/SKILL.md for the full procedure
+```
+
+Checks:
+- `[semantic-staleness]` — concept pages contradicted or thinned by newer sources
+- `[structural-gap]` — cross-links missing between related concepts; entities in 5+ sources with no concept page
+- `[map-coherence]` — cluster prose that no longer matches its linked pages
+- `[provenance-rot]` — fetch-source pages whose content has drifted from the live source
+
+Findings go to `wiki/lint-log.md` (separate from `wiki/log.md`). Structural fixes (cross-links, map prose) are applied immediately. Semantic rewrites are noted only — fixed in a deliberate follow-up pass.
+
+Scope scales with wiki size: full sweep below 150 pages; modified-only above that; cluster-scoped above 400 pages.
+
 ### Integration with maintenance cron
 
 These tools can be called from the maintenance cron prompt to replace the manual detection steps:

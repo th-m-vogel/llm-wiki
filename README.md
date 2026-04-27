@@ -94,7 +94,10 @@ LLM-Wiki/
   scripts/
     wiki-ingest          ← detect ingest candidates (git diff + coverage scan)
     wiki-file-back       ← file a durable answer or output back into the wiki
-    wiki-health          ← structural health check
+    wiki-health          ← structural + navigational health check (script, daily)
+  skills/
+    wiki-done/           ← session write-back skill (end-of-session knowledge capture)
+    wiki-lint/           ← semantic lint skill (LLM-driven, periodic / on-demand)
   templates/
     WIKI-README-template.md       ← template for your new wiki's README
     WIKI-OPERATIONS-template.md   ← template for your new wiki's operations doc
