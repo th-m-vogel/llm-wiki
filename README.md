@@ -90,7 +90,6 @@ LLM-Wiki/
   02-architecture.md     ← folder layout, page types, fetch sources
   03-bootstrap.md        ← stand up a wiki from zero
   04-maintenance.md      ← ongoing maintenance procedure and command tools
-  041-lint-operation.md  ← lint operation design: semantic health checks beyond wiki-health
   05-cron-spec.md        ← automation template
   scripts/
     wiki-ingest          ← detect ingest candidates (git diff + coverage scan)
