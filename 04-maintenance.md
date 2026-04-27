@@ -202,6 +202,76 @@ STEP 2 — Run: wiki-ingest --wiki /path/to/YourWiki
 
 Using `wiki-ingest --corpus <path>` is the recommended approach: it combines git-based detection with uncovered and mtime-based staleness scanning in one pass. The manual methods in Step 2 of this document are the fallback when the scripts are not installed.
 
+## Write-back — session knowledge capture
+
+Maintenance runs on a schedule and pulls from static sources. Write-back is the complementary operation that runs at the end of a substantive work session and captures durable knowledge from the conversation itself before context is lost.
+
+**Trigger:** the human sends a closing signal (`/wiki-done` or equivalent) at the end of a session that involved real domain work — investigation, troubleshooting, design decisions, discovery. Do not run write-back after routine maintenance passes or trivial lookups.
+
+### When a write-back is warranted
+
+A sweep is worth running when the session produced:
+- A durable insight not yet in the wiki (new concept, corrected understanding, discovered pattern)
+- A design or operational decision worth preserving as provenance
+- Cross-source synthesis that won't be obvious from the raw sources alone
+
+If nothing qualifies → append a no-op entry to `wiki/log.md` and stop:
+```
+YYYY-MM-DD — Session sweep: <topic> — no-op, nothing durable produced
+```
+
+### Write-back procedure
+
+**1. Create a session source page** at `wiki/sources/YYYY-MM-DD-session-<topic-slug>.md`:
+
+```markdown
+---
+provenance: conversation YYYY-MM-DD
+session_topic: <one-line description>
+ingested: YYYY-MM-DD
+---
+
+## Session summary
+
+- <bullet: decision or insight 1>
+- <bullet: decision or insight 2>
+- ...
+```
+
+3–6 bullets. Not a transcript. Decisions, patterns, discoveries, corrections. Treat conversation context as a source — apply the same ingest decision rules as any other source.
+
+**2. File back qualifying content** using the same tier rules as any ingest:
+
+| Tier | Condition | Action |
+|------|-----------|--------|
+| 1 | New durable concept or significant update | Create/update `wiki/concepts/<slug>.md` |
+| 2 | Cross-source synthesis or operational decision | Create `wiki/syntheses/YYYY-MM-DD-<slug>.md` |
+| 3 | Noted but not page-worthy | Session source body only |
+
+Use `wiki-file-back` or write the page directly. Provenance on every page: `provenance: conversation YYYY-MM-DD`.
+
+**3. Update indices and log:**
+- Add session source to `wiki/sources.md`
+- If new concept/synthesis pages created: update `wiki/concepts.md`, `wiki/syntheses.md`, `wiki/index.md`
+- Append to `wiki/log.md`:
+  ```
+  YYYY-MM-DD — Session sweep: <topic> — <one-line: what was filed>
+  ```
+
+**4. Refresh the semantic index** if any pages were written (same as after a maintenance ingest).
+
+**5. Confirm** to the human what was filed, or that it was a no-op.
+
+### Why this matters
+
+Maintenance captures what is in files. Write-back captures what is in conversations. Without it, every session that produces a useful insight is a one-way trip — the knowledge lives in chat history, not in the wiki, and is effectively gone when the context window closes.
+
+### Platform notes
+
+The `skills/wiki-done/SKILL.md` file in this repo is a ready-to-deploy skill implementing this procedure. Fill in `$WIKI_ROOT` before deploying. The trigger phrase (`/wiki-done`) is a convention — adapt it to whatever closing signal fits your platform.
+
+---
+
 ## What maintenance is NOT
 
 - **It is not a full re-read of all sources.** You check what changed, not everything.
