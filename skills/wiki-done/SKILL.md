@@ -31,23 +31,33 @@ Discard: ephemeral answers, lookups of values already in the wiki, task-specific
 
 ### 2 — Decide: sweep or no-op
 
-If nothing qualifies → log a no-op entry in `wiki/log.md` and stop. No session source page needed.
+**No-op path:** if nothing qualifies, append to `wiki/log.md`:
+```
+YYYY-MM-DD — Session sweep: <topic> — no-op, nothing durable produced
+```
+Then stop. Do not create a session source page.
 
-If anything qualifies → continue.
+**Sweep path:** if anything qualifies → continue.
 
 ### 3 — Create a session source page
 
-Create `$WIKI_ROOT/wiki/sources/YYYY-MM-DD-session-<topic-slug>.md` with this frontmatter:
+Create `$WIKI_ROOT/wiki/sources/YYYY-MM-DD-session-<topic-slug>.md`:
 
-```
+```markdown
 ---
 provenance: conversation YYYY-MM-DD
 session_topic: <one-line description>
 ingested: YYYY-MM-DD
 ---
+
+## Session summary
+
+- <bullet: decision or insight 1>
+- <bullet: decision or insight 2>
+- ...
 ```
 
-Body: a brief summary of what was discussed — decisions made, patterns discovered, design rationale. Not a transcript. Two to six bullet points is usually right.
+3–6 bullets. Not a transcript. Decisions, patterns, discoveries, corrections.
 
 ### 4 — File back qualifying content
 
@@ -76,6 +86,17 @@ Apply the same tier rules as any ingest:
   <one-line summary of what was filed back>
   ```
 
-### 6 — Done
+### 6 — Refresh semantic index (if pages were written)
+
+If your deployment uses a semantic search index (e.g. qmd), refresh it now:
+
+```bash
+# example for qmd-based deployments
+$QMD_BIN embed
+```
+
+Skip this step if no semantic index is configured.
+
+### 7 — Done
 
 Confirm to the user what was filed (or that it was a no-op). No further action needed.
