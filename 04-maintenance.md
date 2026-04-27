@@ -178,13 +178,21 @@ wiki-health --wiki /path/to/YourWiki
 wiki-health --wiki /path/to/YourWiki --json   # machine-readable
 ```
 
-Checks:
+Checks — structural (ERROR on failure):
 - `[provenance]` — source pages missing `provenance:` frontmatter
 - `[orphan]` — pages not listed in their index files
 - `[stale-log]` — `wiki/log.md` not updated in >48h
 - `[empty-inbox]` — unprocessed files in `raw/inbox/`
 - `[broken-link]` — wikilinks pointing to non-existent pages
 - `[no-concepts]` / `[no-sources]` — missing core directories
+
+Checks — navigational and quality (WARN only):
+- `[stub-map]` — map pages containing unfilled stub patterns (`<!-- populated`, `pending ingest`, etc.) or sections with no wikilinks
+- `[unmapped]` — source, concept, decision, or synthesis pages not referenced from any map page
+- `[quality-floor]` — concept pages with <80 words and no outbound wikilinks (stub in practice)
+- `[url-reachable]` — fetch-source pages whose declared URL is unreachable
+
+ERRORS require immediate repair. WARNINGs indicate navigational drift or quality gaps — fix in the current session or queue for the next lint pass.
 
 Exit 0 = healthy or warnings only. Exit 2 = errors found.
 

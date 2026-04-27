@@ -6,13 +6,17 @@
 #   wiki-health --wiki <path> --json      # machine-readable output
 #
 # Checks:
-#   [provenance]  source pages missing provenance: frontmatter
-#   [orphan]      concept/source pages not listed in their index files
-#   [stale-log]   wiki/log.md not updated in >48h
-#   [empty-inbox] raw/inbox/ has unprocessed files
-#   [broken-link] wikilinks pointing to non-existent pages (basic scan)
-#   [no-concepts] wiki/concepts/ is empty or missing
-#   [no-sources]  wiki/sources/ is empty or missing
+#   [provenance]     source pages missing provenance: frontmatter
+#   [orphan]         concept/source pages not listed in their index files
+#   [stale-log]      wiki/log.md not updated in >48h
+#   [empty-inbox]    raw/inbox/ has unprocessed files
+#   [broken-link]    wikilinks pointing to non-existent pages (basic scan)
+#   [no-concepts]    wiki/concepts/ is empty or missing
+#   [no-sources]     wiki/sources/ is empty or missing
+#   [stub-map]       map pages contain unfilled stub patterns (WARN)
+#   [unmapped]       source/concept/decision/synthesis pages not referenced from any map (WARN)
+#   [quality-floor]  concept pages with very low word count and no outbound links (WARN)
+#   [url-reachable]  fetch-source pages with unreachable URLs (WARN)
 #
 # Exit 0 = healthy (or only warnings). Exit 2 = errors found.
 
@@ -175,6 +179,108 @@ while IFS= read -r f; do
 done < <(find "$WIKI/wiki" -name "*.md" | sort)
 if [[ $BROKEN -eq 0 ]]; then
   ok broken-link "No broken wikilinks detected"
+fi
+
+# --- Check: stub patterns in map pages (Cat 1 — navigational staleness) ---
+if [[ -d "$WIKI/wiki/maps" ]]; then
+  STUB_PATTERNS=('<!-- populated' 'pending.*ingest' 'pending first' 'coming soon' 'to be added')
+  STUB_COUNT=0
+  while IFS= read -r f; do
+    for pat in "${STUB_PATTERNS[@]}"; do
+      if grep -qiE "$pat" "$f" 2>/dev/null; then
+        flag WARN stub-map "Map page contains unfilled stub pattern ('$pat'): $(basename "$f")"
+        ((STUB_COUNT++)) || true
+        break
+      fi
+    done
+    # Check for section headings with zero wikilinks in the section
+    # Extract heading lines and check if next content block has any [[links]]
+    python3 - "$f" << 'PYEOF' 2>/dev/null | while IFS= read -r line; do
+import sys, re
+path = sys.argv[1]
+try:
+    content = open(path).read()
+except:
+    sys.exit(0)
+sections = re.split(r'^(#{1,3} .+)$', content, flags=re.MULTILINE)
+for i in range(1, len(sections)-1, 2):
+    heading = sections[i].strip()
+    body = sections[i+1] if i+1 < len(sections) else ''
+    # Skip the heading if it has no body or body is just whitespace/comments
+    body_stripped = re.sub(r'<!--.*?-->', '', body, flags=re.DOTALL).strip()
+    if body_stripped and '[[' not in body:
+        print(f"{heading}")
+PYEOF
+      flag WARN stub-map "Map section has no wikilinks in $(basename "$f"): $line"
+    done
+  done < <(find "$WIKI/wiki/maps" -name "*.md" 2>/dev/null | sort)
+  if [[ $STUB_COUNT -eq 0 ]]; then
+    ok stub-map "No stub patterns found in map pages"
+  fi
+else
+  flag WARN stub-map "wiki/maps/ directory missing — no navigational maps found"
+fi
+
+# --- Check: coverage drift — pages not referenced from any map (Cat 2) ---
+MAP_CONTENT=""
+if [[ -d "$WIKI/wiki/maps" ]]; then
+  MAP_CONTENT=$(cat "$WIKI"/wiki/maps/*.md 2>/dev/null || true)
+fi
+
+_check_unmapped() {
+  local dir="$1" label="$2"
+  [[ -d "$dir" ]] || return
+  local count=0
+  while IFS= read -r f; do
+    local slug
+    slug="$(basename "$f" .md)"
+    if [[ -n "$MAP_CONTENT" ]] && ! echo "$MAP_CONTENT" | grep -qF "$slug"; then
+      flag WARN unmapped "$label page not referenced from any map: $slug"
+      ((count++)) || true
+    fi
+  done < <(find "$dir" -name "*.md" 2>/dev/null | sort)
+  if [[ $count -eq 0 && -d "$dir" ]]; then
+    ok unmapped "All $label pages referenced from maps"
+  fi
+}
+
+_check_unmapped "$WIKI/wiki/concepts"   "concept"
+_check_unmapped "$WIKI/wiki/sources"    "source"
+_check_unmapped "$WIKI/wiki/decisions"  "decision"
+_check_unmapped "$WIKI/wiki/syntheses"  "synthesis"
+
+# --- Check: concept quality floor (Cat 7) ---
+if [[ -d "$WIKI/wiki/concepts" ]]; then
+  STUB_CONCEPTS=0
+  while IFS= read -r f; do
+    word_count=$(wc -w < "$f" 2>/dev/null || echo 999)
+    link_count=$(grep -oP '\[\[' "$f" 2>/dev/null | wc -l || echo 1)
+    if [[ "$word_count" -lt 80 && "$link_count" -eq 0 ]]; then
+      flag WARN quality-floor "Concept page appears to be a stub (<80 words, no wikilinks): $(basename "$f")"
+      ((STUB_CONCEPTS++)) || true
+    fi
+  done < <(find "$WIKI/wiki/concepts" -name "*.md" 2>/dev/null | sort)
+  if [[ $STUB_CONCEPTS -eq 0 ]]; then
+    ok quality-floor "All concept pages meet minimum quality threshold"
+  fi
+fi
+
+# --- Check: fetch-source URL reachability (Cat 6) ---
+FETCH_DIR="$WIKI/raw/fetch-sources"
+if [[ -d "$FETCH_DIR" ]]; then
+  URL_FAIL=0
+  while IFS= read -r f; do
+    url=$(grep -m1 '^url:' "$f" 2>/dev/null | sed 's/^url: *//' | tr -d '"' || true)
+    [[ -z "$url" ]] && continue
+    if ! curl -sf --max-time 10 --head "$url" -o /dev/null 2>/dev/null; then
+      flag WARN url-reachable "Fetch-source URL unreachable ($(basename "$f")): $url"
+      ((URL_FAIL++)) || true
+    fi
+  done < <(find "$FETCH_DIR" -name "*.md" 2>/dev/null | sort)
+  if [[ $URL_FAIL -eq 0 ]]; then
+    FETCH_COUNT=$(find "$FETCH_DIR" -name "*.md" | wc -l | tr -d ' ')
+    ok url-reachable "All $FETCH_COUNT fetch-source URL(s) reachable"
+  fi
 fi
 
 # --- Output ---
